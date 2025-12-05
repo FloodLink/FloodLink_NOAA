@@ -29,16 +29,16 @@ import pygrib
 # -------------------------------
 # CONFIGURATION
 # -------------------------------
-CSV_PATH = "cities15000.csv"
+CSV_PATH = "Citiesglobal.csv"
 COMPARISON_PATH = "alerts_comparison.json"   # single source of truth
 TWEET_LOG_PATH = "tweeted_alerts.json"       # map-ready tweet history
 
 SLEEP_BETWEEN_CALLS = 0.1         # seconds between API calls (not used for bulk)
 COMPARISON_HISTORY = 5  # or 10
 TIMEZONE = "Europe/Madrid"
-MAX_RETRIES = 1
+MAX_RETRIES = 3                    # Increased for downloads
 TIMEOUT = 30                       # request timeout (s) per NOAA download
-FORECAST_HOURS = 6                # Extended to 12 for NOAA
+FORECAST_HOURS = 12                # Extended to 12 for NOAA
 
 # --- Twitter config ---
 TWITTER_ENABLED = os.getenv("TWITTER_ENABLED", "false").lower() == "true"
@@ -80,10 +80,10 @@ LEVELS = ["None", "Low", "Medium", "High", "Extreme"]
 # -------------------------------
 GFS_RES = '0p50'  # Use 0.5° for smaller files (<10 MB); change to '0p25' for finer res
 VARIABLES = ['APCP', 'RH', 'SOILW']
-LEVELS = {
+LEVELS_DICT = {
     'APCP': 'surface',
-    'RH': '2_m_above_ground',
-    'SOILW': '0-0.1_m_below_ground'
+    'RH': '2 m above ground',
+    'SOILW': '0-10 cm below ground layer'  # Corrected for GFS standard
 }
 
 def get_latest_cycle():
@@ -106,21 +106,22 @@ def download_gfs_file(date, cycle, fhr):
     params = f"file={file}&dir={dir_path}"
     for var in VARIABLES:
         params += f"&var_{var}=on"
-        lev = LEVELS[var].replace('-', '_').replace('.', '_').replace(' ', '_')
-        if 'below_ground' in lev:
-            lev = lev.replace('m', ' m')
+        lev = LEVELS_DICT[var].replace('-', '_').replace('.', '_').replace(' ', '_')
         params += f"&lev_{lev}=on"
     url = base_url + params
-    try:
-        r = requests.get(url, timeout=TIMEOUT)
-        r.raise_for_status()
-        file_path = f"gfs_{cycle}_f{fhr:03d}.grb2"
-        with open(file_path, 'wb') as f:
-            f.write(r.content)
-        return file_path
-    except Exception as e:
-        print(f"Download failed for {url}: {e}")
-        return None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            r = requests.get(url, timeout=TIMEOUT)
+            r.raise_for_status()
+            file_path = f"gfs_{cycle}_f{fhr:03d}.grb2"
+            with open(file_path, 'wb') as f:
+                f.write(r.content)
+            print(f"Downloaded {file_path} (size: {os.path.getsize(file_path) / 1024 / 1024:.2f} MB)")
+            return file_path
+        except Exception as e:
+            print(f"Download failed for {url} (attempt {attempt}/{MAX_RETRIES}): {e}")
+            time.sleep(2 ** attempt)  # Exponential backoff
+    return None
 
 def load_gfs_grids(forecast_hours):
     date, cycle, prev_date, prev_cycle = get_latest_cycle()
@@ -137,7 +138,7 @@ def load_gfs_grids(forecast_hours):
         grb = pygrib.open(file)
         for var in VARIABLES:
             if var == 'SOILW':
-                msg = grb.select(name='Volumetric soil moisture content', typeOfLevel='depthBelowLandLayer', bottomLevel=0.1, topLevel=0)[0]
+                msg = grb.select(name='Volumetric soil moisture content', typeOfLevel='depthBelowLandLayer', bottomLevel=10, topLevel=0)[0]
             elif var == 'RH':
                 msg = grb.select(name='Relative humidity', typeOfLevel='heightAboveGround', level=2)[0]
             else:  # APCP
@@ -182,7 +183,7 @@ def compute_indicators(grids, lats, lons, times, lat, lon):
         soil_vals.append(griddata(points, grids['SOILW'][t].ravel(), (lat, lon), method='nearest'))
     rain_sum = sum(rain_vals)
     rh_avg = sum(rh_vals) / len(rh_vals) if rh_vals else 0.0
-    soil_norm = [min(max(x, 0.0), 1.0) for x in soil_vals]  # GFS SOILW is 0-1 fraction
+    soil_norm = [min(max(x / 0.6, 0.0), 1.0) for x in soil_vals]  # Normalize like Open-Meteo (GFS max ~0.6)
     soil_avg = sum(soil_norm) / len(soil_norm) if soil_norm else 0.0
     if any(rain_vals):
         max_idx = np.argmax(rain_vals)
