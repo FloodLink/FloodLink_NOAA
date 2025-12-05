@@ -36,7 +36,7 @@ TWEET_LOG_PATH = "tweeted_alerts.json"       # map-ready tweet history
 SLEEP_BETWEEN_CALLS = 0.1         # seconds between API calls (not used for bulk)
 COMPARISON_HISTORY = 5  # or 10
 TIMEZONE = "Europe/Madrid"
-MAX_RETRIES = 3                    # Increased for downloads
+MAX_RETRIES = 1                    # Increased for downloads
 TIMEOUT = 30                       # request timeout (s) per NOAA download
 FORECAST_HOURS = 6                # Extended to 12 for NOAA
 
