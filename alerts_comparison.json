@@ -1,0 +1,7 @@
+{
+  "timestamp": "2025-12-05T23:11:04.651059Z",
+  "source": "NOAA GFS",
+  "forecast_window_hours": 6,
+  "features_evaluated": 0,
+  "alerts": []
+}
