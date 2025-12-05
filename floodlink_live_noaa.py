@@ -100,19 +100,17 @@ def get_latest_cycle():
     return date, cycle, date, prev_cycle
 
 def download_gfs_file(date, cycle, fhr):
-    base_url = f"https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_{GFS_RES}.pl?"
-    file = f"gfs.t{cycle}z.pgrb2.{GFS_RES}.f{fhr:03d}"
-    dir_path = f"%2Fgfs.{date}%2F{cycle}%2Fatmos"
-    params = f"file={file}&dir={dir_path}"
+    base_url = f"https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_{GFS_RES}.pl"
+    params = {
+        "file": f"gfs.t{cycle}z.pgrb2.{GFS_RES}.f{fhr:03d}",
+        "dir": f"/gfs.{date}/{cycle}/atmos"
+    }
     for var in VARIABLES:
-        params += f"&var_{var}=on"
-        lev = LEVELS_DICT[var].replace('-', '_').replace('.', '_').replace(' ', '_')
-        params += f"&lev_{lev}=on"
-    url = base_url + params
-    print(f"Trying URL: {url}")
+        params[f"var_{var}"] = "on"
+        params[f"lev_{LEVELS_DICT[var]}"] = "on"
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            r = requests.get(url, timeout=TIMEOUT)
+            r = requests.get(base_url, params=params, timeout=TIMEOUT)
             r.raise_for_status()
             file_path = f"gfs_{cycle}_f{fhr:03d}.grb2"
             with open(file_path, 'wb') as f:
@@ -120,7 +118,8 @@ def download_gfs_file(date, cycle, fhr):
             print(f"Downloaded {file_path} (size: {os.path.getsize(file_path) / 1024 / 1024:.2f} MB)")
             return file_path
         except Exception as e:
-            print(f"Download failed for {url} (attempt {attempt}/{MAX_RETRIES}): {e}")
+            print(f"Download failed (attempt {attempt}/{MAX_RETRIES}): {e}")
+            print(f"URL tried: {r.url if 'r' in locals() else base_url + '?' + '&'.join([k+'='+v for k,v in params.items()])}")
             time.sleep(2 ** attempt)  # Exponential backoff
     return None
 
