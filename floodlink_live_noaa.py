@@ -29,7 +29,7 @@ import pygrib
 # -------------------------------
 # CONFIGURATION
 # -------------------------------
-CSV_PATH = "Citiesglobal.csv"
+CSV_PATH = "cities15000.csv"
 COMPARISON_PATH = "alerts_comparison.json"   # single source of truth
 TWEET_LOG_PATH = "tweeted_alerts.json"       # map-ready tweet history
 
@@ -38,7 +38,7 @@ COMPARISON_HISTORY = 5  # or 10
 TIMEZONE = "Europe/Madrid"
 MAX_RETRIES = 3                    # Increased for downloads
 TIMEOUT = 30                       # request timeout (s) per NOAA download
-FORECAST_HOURS = 12                # Extended to 12 for NOAA
+FORECAST_HOURS = 6                # Extended to 12 for NOAA
 
 # --- Twitter config ---
 TWITTER_ENABLED = os.getenv("TWITTER_ENABLED", "false").lower() == "true"
