@@ -83,7 +83,7 @@ VARIABLES = ['APCP', 'RH', 'SOILW']
 LEVELS_DICT = {
     'APCP': 'surface',
     'RH': '2 m above ground',
-    'SOILW': '0-10 cm below ground layer'  # Corrected for GFS standard
+    'SOILW': '0-0.1 m below ground'  # Corrected for GFS standard
 }
 
 def get_latest_cycle():
@@ -109,6 +109,7 @@ def download_gfs_file(date, cycle, fhr):
         lev = LEVELS_DICT[var].replace('-', '_').replace('.', '_').replace(' ', '_')
         params += f"&lev_{lev}=on"
     url = base_url + params
+    print(f"Trying URL: {url}")
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             r = requests.get(url, timeout=TIMEOUT)
@@ -138,7 +139,7 @@ def load_gfs_grids(forecast_hours):
         grb = pygrib.open(file)
         for var in VARIABLES:
             if var == 'SOILW':
-                msg = grb.select(name='Volumetric soil moisture content', typeOfLevel='depthBelowLandLayer', bottomLevel=10, topLevel=0)[0]
+                msg = grb.select(name='Volumetric soil moisture content', typeOfLevel='depthBelowLandLayer', bottomLevel=0.1, topLevel=0)[0]
             elif var == 'RH':
                 msg = grb.select(name='Relative humidity', typeOfLevel='heightAboveGround', level=2)[0]
             else:  # APCP
@@ -427,6 +428,11 @@ def main():
     previous = load_json(COMPARISON_PATH)
     prev_alerts_dict = build_alert_dict(previous.get("alerts", []))
     tweeted_alerts = load_tweeted_alerts()
+
+    print(f"Current working directory: {os.getcwd()}")
+    if not os.path.exists(CSV_PATH):
+        print(f"❌ CSV file not found: {CSV_PATH} – skipping evaluation.")
+        return  # Or handle as needed
 
     df = pd.read_csv(CSV_PATH)
     high_risk = df[df["FRisk"] > RISK_THRESHOLD].copy()
