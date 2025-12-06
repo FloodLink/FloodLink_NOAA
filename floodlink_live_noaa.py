@@ -107,9 +107,10 @@ def download_gfs_file(date, cycle, fhr):
     }
     for var in VARIABLES:
         params[f"var_{var}"] = "on"
-        lev = LEVELS_DICT[var].replace(' ', '_').replace('-', '_').replace('.', '_')
+        lev = LEVELS_DICT[var].replace(' ', '_')  # Only replace spaces
         params[f"lev_{lev}"] = "on"
-    print(f"Params: {params}")
+    full_url = base_url + "?" + "&".join([f"{k}={v}" for k, v in params.items()])
+    print(f"Attempting download with URL: {full_url}")
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             r = requests.get(base_url, params=params, timeout=TIMEOUT)
@@ -121,7 +122,6 @@ def download_gfs_file(date, cycle, fhr):
             return file_path
         except Exception as e:
             print(f"Download failed (attempt {attempt}/{MAX_RETRIES}): {e}")
-            print(f"URL tried: {r.url if 'r' in locals() else base_url + '?' + '&'.join([k+'='+v for k,v in params.items()])}")
             time.sleep(2 ** attempt)  # Exponential backoff
     return None
 
