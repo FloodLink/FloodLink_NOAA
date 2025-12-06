@@ -101,14 +101,14 @@ def get_latest_cycle():
 
 def download_gfs_file(date, cycle, fhr):
     base_url = f"https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_{GFS_RES}.pl"
-    grid_type = "pgrb2full" if GFS_RES == '0p50' else "pgrb2"
     params = {
-        "file": f"gfs.t{cycle}z.{grid_type}.{GFS_RES}.f{fhr:03d}",
+        "file": f"gfs.t{cycle}z.pgrb2.{GFS_RES}.f{fhr:03d}",
         "dir": f"/gfs.{date}/{cycle}/atmos"
     }
     for var in VARIABLES:
         params[f"var_{var}"] = "on"
-        params[f"lev_{LEVELS_DICT[var]}"] = "on"
+        lev = LEVELS_DICT[var].replace(' ', '_').replace('-', '_').replace('.', '_')
+        params[f"lev_{lev}"] = "on"
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             r = requests.get(base_url, params=params, timeout=TIMEOUT)
