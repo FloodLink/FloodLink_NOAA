@@ -18,6 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     
     env:
+      # 👇 force unbuffered stdout so logs stream live
+      PYTHONUNBUFFERED: "1"
+
       # ✅ enable live tweets
       TWITTER_ENABLED: "true"
       
@@ -52,7 +55,7 @@ jobs:
         run: |
           echo "Starting live flood risk evaluation..."
           echo "TWITTER_ENABLED=$TWITTER_ENABLED"
-          python floodlink_live_noaa.py
+          python -u floodlink_live_noaa.py
 
       - name: 💾 Commit and push updated alerts JSON
         env:
