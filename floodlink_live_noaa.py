@@ -493,13 +493,32 @@ def main():
         return
 
     df = pd.read_csv(CSV_PATH)
+    
+    # --- Basic CSV + FRisk summary ---
+    print("📊 CSV summary:")
+    print(f"  Total rows: {len(df)}")
+    if "FRisk" in df.columns:
+        print(f"  FRisk min/max: {df['FRisk'].min()} / {df['FRisk'].max()}")
+    else:
+        print("  ⚠️ Column 'FRisk' not found in CSV!")
+    
     high_risk = df[df["FRisk"] > RISK_THRESHOLD].copy()
-
+    print(f"  High-risk rows (FRisk > {RISK_THRESHOLD}): {len(high_risk)}")
+    
+    # --- Optional FAST MODE for testing ---
+    FAST_MODE = False      # set True (or use an env var) while testing
+    FAST_SAMPLE = 200      # e.g. evaluate only first 200 cities
+    
+    if FAST_MODE and not high_risk.empty:
+        high_risk = high_risk.head(FAST_SAMPLE)
+        print(f"⚡ FAST MODE: only evaluating first {len(high_risk)} cities")
+    
     valid_coords = {f"{row['Latitude']:.4f},{row['Longitude']:.4f}" for _, row in df.iterrows()}
     tweeted_alerts = cleanup_tweeted_alerts(tweeted_alerts, valid_coords)
-
+    
     alerts = []
     start_time = time.time()
+
 
     # Load NOAA GFS grids once for all locations
     grids, lats, lons, times = load_gfs_grids(FORECAST_HOURS)
@@ -513,25 +532,31 @@ def main():
                 alerts.append(prev_alert)
         # Skip new ones entirely if no met data
     else:
-        for _, row in high_risk.iterrows():
+        total = len(high_risk)
+        for idx, (_, row) in enumerate(high_risk.iterrows(), start=1):
+    
+            # Progress log every 100 cities (and at the very end)
+            if idx % 100 == 0 or idx == total:
+                print(f"… processed {idx}/{total} cities")
+    
             lat, lon = float(row["Latitude"]), float(row["Longitude"])
             base_risk = float(row["FRisk"])
             name = str(row.get("ETIQUETA", f"id_{row['JOIN_ID']}"))
             country = str(row.get("Country", "")).strip()
-
+    
             rain_sum, soil_avg, peak_dt_local = compute_indicators(
                 grids, lats, lons, times, lat, lon
             )
-
+    
             raw_score, dyn_level, r_mult, s_mult = calculate_dynamic_risk_raw(
                 base_risk, rain_sum, soil_avg
             )
-
+    
             if peak_dt_local is not None:
                 peak_time_local_str = peak_dt_local.strftime("%H:%M")
             else:
                 peak_time_local_str = "unknown"
-
+    
             alerts.append({
                 "id": str(row["JOIN_ID"]),
                 "country": country,
@@ -539,20 +564,18 @@ def main():
                 "latitude": lat,
                 "longitude": lon,
                 "base_risk": round(base_risk, 2),
-
+    
                 f"rain_{FORECAST_HOURS}h_mm": round(rain_sum, 2),
                 "soil_moisture_avg": round(soil_avg, 3),
-
-                # Diagnostics for tuning
+    
                 "rain_mult": round(r_mult, 3),
                 "soil_mult": round(s_mult, 3),
-
+    
                 "raw_dynamic_score": raw_score,
                 "dynamic_level": dyn_level,
-
-                # NEW: time of max rainfall in the window
                 "peak_time_local_str": peak_time_local_str,
             })
+
 
     # Persist current results
     result = {
