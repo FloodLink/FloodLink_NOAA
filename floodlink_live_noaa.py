@@ -101,8 +101,9 @@ def get_latest_cycle():
 
 def download_gfs_file(date, cycle, fhr):
     base_url = f"https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_{GFS_RES}.pl"
+    grid_type = "pgrb2full" if GFS_RES == '0p50' else "pgrb2"
     params = {
-        "file": f"gfs.t{cycle}z.pgrb2.{GFS_RES}.f{fhr:03d}",
+        "file": f"gfs.t{cycle}z.{grid_type}.{GFS_RES}.f{fhr:03d}",
         "dir": f"/gfs.{date}/{cycle}/atmos"
     }
     for var in VARIABLES:
