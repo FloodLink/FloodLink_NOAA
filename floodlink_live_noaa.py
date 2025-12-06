@@ -102,12 +102,19 @@ def get_latest_cycle():
 def download_gfs_file(date, cycle, fhr):
     base_url = f"https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_{GFS_RES}.pl"
     params = {
-        "file": f"gfs.t{cycle}z.pgrb2.{GFS_RES}.f{fhr:03d}",
-        "dir": f"/gfs.{date}/{cycle}/atmos"
+        "dir": f"/gfs.{date}/{cycle}/atmos",  # Put dir FIRST
+        "file": f"gfs.t{cycle}z.pgrb2full.{GFS_RES}.f{fhr:03d}",  # Added 'full' for 0p50
     }
+    # Optional: Add subregion to reduce file size (global by default; customize as needed)
+    params.update({
+        "leftlon": 0,     # 0 to 360 for global (or -180 to 180)
+        "rightlon": 360,
+        "toplat": 90,
+        "bottomlat": -90,
+    })
     for var in VARIABLES:
         params[f"var_{var}"] = "on"
-        lev = LEVELS_DICT[var].replace(' ', '_')  # Only replace spaces
+        lev = LEVELS_DICT[var].replace(' ', '_')  # Only replace spaces; keep - and .
         params[f"lev_{lev}"] = "on"
     full_url = base_url + "?" + "&".join([f"{k}={v}" for k, v in params.items()])
     print(f"Attempting download with URL: {full_url}")
@@ -124,6 +131,7 @@ def download_gfs_file(date, cycle, fhr):
             print(f"Download failed (attempt {attempt}/{MAX_RETRIES}): {e}")
             time.sleep(2 ** attempt)  # Exponential backoff
     return None
+
 
 def load_gfs_grids(forecast_hours):
     date, cycle, prev_date, prev_cycle = get_latest_cycle()
