@@ -56,8 +56,6 @@ RISK_THRESHOLD = 8.5         # baseline FRisk cutoff from GIS layer
 RAIN_UNIT_MM   = 100.0       # 100 mm → 1.0× rain multiplier
 SOIL_MIN_MULT  = 0.95         # soil=0 -> 0.8×
 SOIL_MAX_MULT  = 1.8         # soil=1 -> 1.8×
-HUM_MIN_MULT   = 1.0         # RH=0% -> 0.9×
-HUM_MAX_MULT   = 1.05         # RH=100% -> 1.1×
 RAIN_CUTOFF_MM = 0.0         # set 0.5 to ignore drizzle; 0.0 keeps strict linearity
 
 # RAW alert bands (tune later or learn from rolling percentiles)
@@ -79,10 +77,9 @@ LEVELS = ["None", "Low", "Medium", "High", "Extreme"]
 # NOAA GFS CONFIG
 # -------------------------------
 GFS_RES = '0p50'  # Use 0.5° for smaller files (<10 MB); change to '0p25' for finer res
-VARIABLES = ['APCP', 'RH', 'SOILW']
+VARIABLES = ['APCP', 'SOILW']
 LEVELS_DICT = {
     'APCP': 'surface',
-    'RH': '2 m above ground',
     'SOILW': '0-0.1 m below ground'  # Corrected for GFS standard
 }
 
@@ -96,36 +93,56 @@ def get_latest_cycle():
         prev_date = (now - timedelta(days=1)).strftime('%Y%m%d')
         prev_cycle = '18'
         return date, cycle, prev_date, prev_cycle
+        
     prev_cycle = f"{cycle_hour - 6:02d}"
     return date, cycle, date, prev_cycle
+
+def get_forecast_steps(max_hours: int):
+    """
+    For GFS 0.5° pgrb2full, early forecast hours are 3-hourly:
+      f003, f006, f009, ...
+    This avoids 404s for f001, f002, etc.
+    """
+    if GFS_RES in ("0p50", "1p00"):
+        step = 3
+        # e.g. max_hours=6 -> [3, 6]
+        return list(range(step, max_hours + 1, step))
+    else:
+        # For 0.25° hourly stream (if you ever switch)
+        return list(range(1, max_hours + 1))
 
 def download_gfs_file(date, cycle, fhr):
     base_url = f"https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_{GFS_RES}.pl"
     params = {
-        "dir": f"/gfs.{date}/{cycle}/atmos",  # Put dir FIRST
-        "file": f"gfs.t{cycle}z.pgrb2full.{GFS_RES}.f{fhr:03d}",  # Added 'full' for 0p50
+        "dir": f"/gfs.{date}/{cycle}/atmos",
+        "file": f"gfs.t{cycle}z.pgrb2full.{GFS_RES}.f{fhr:03d}",
     }
-    # Optional: Add subregion to reduce file size (global by default; customize as needed)
+
+    # Optional: global domain; you can tighten this later
     params.update({
-        "leftlon": 0,     # 0 to 360 for global (or -180 to 180)
+        "leftlon": 0,
         "rightlon": 360,
         "toplat": 90,
         "bottomlat": -90,
     })
+
     for var in VARIABLES:
         params[f"var_{var}"] = "on"
-        lev = LEVELS_DICT[var].replace(' ', '_')  # Only replace spaces; keep - and .
+        lev = LEVELS_DICT[var].replace(" ", "_")  # spaces -> underscore
         params[f"lev_{lev}"] = "on"
+
     full_url = base_url + "?" + "&".join([f"{k}={v}" for k, v in params.items()])
     print(f"Attempting download with URL: {full_url}")
+
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             r = requests.get(base_url, params=params, timeout=TIMEOUT)
             r.raise_for_status()
             file_path = f"gfs_{cycle}_f{fhr:03d}.grb2"
-            with open(file_path, 'wb') as f:
+            with open(file_path, "wb") as f:
                 f.write(r.content)
-            print(f"Downloaded {file_path} (size: {os.path.getsize(file_path) / 1024 / 1024:.2f} MB)")
+            size_mb = os.path.getsize(file_path) / 1024 / 1024
+            print(f"Downloaded {file_path} (size: {size_mb:.2f} MB)")
             return file_path
         except Exception as e:
             print(f"Download failed (attempt {attempt}/{MAX_RETRIES}): {e}")
@@ -138,72 +155,103 @@ def load_gfs_grids(forecast_hours):
     grids = {var: [] for var in VARIABLES}
     times = []
     lats, lons = None, None
-    for fhr in range(1, forecast_hours + 1):  # f001 to f012 for next 12h
+
+    forecast_steps = get_forecast_steps(forecast_hours)
+
+    for fhr in forecast_steps:
         file = download_gfs_file(date, cycle, fhr)
         if file is None:
             # Fallback to previous cycle
             file = download_gfs_file(prev_date, prev_cycle, fhr)
             if file is None:
                 continue
+
         grb = pygrib.open(file)
         for var in VARIABLES:
-            if var == 'SOILW':
-                msg = grb.select(name='Volumetric soil moisture content', typeOfLevel='depthBelowLandLayer', bottomLevel=0.1, topLevel=0)[0]
-            elif var == 'RH':
-                msg = grb.select(name='Relative humidity', typeOfLevel='heightAboveGround', level=2)[0]
+            if var == "SOILW":
+                try:
+                    msg = grb.select(
+                        name="Volumetric soil moisture content",
+                        typeOfLevel="depthBelowLandLayer",
+                        bottomLevel=0.1,
+                        topLevel=0
+                    )[0]
+                except ValueError:
+                    print(f"⚠️ No SOILW field in {file}, skipping soil moisture for this step.")
+                    continue
             else:  # APCP
-                msg = grb.select(name='Total Precipitation')[0]
+                msg = grb.select(name="Total Precipitation")[0]
+
             grids[var].append(msg.values)
             if lats is None:
                 lats, lons = msg.latlons()
-        times.append(msg.validDate)  # UTC
+
+        times.append(msg.validDate)  # UTC time of this forecast step
         grb.close()
         os.remove(file)
+
+    # Stack into 3D arrays [time, lat, lon]
     for var in grids:
         grids[var] = np.stack(grids[var]) if grids[var] else None
+
     return grids, lats, lons, times
+
 
 # -------------------------------
 # WEATHER INDICATORS
 # -------------------------------
 def compute_indicators(grids, lats, lons, times, lat, lon):
     """
-    Use the next FORECAST_HOURS from GFS grids.
+    Use the available GFS grids to compute indicators for a point.
 
     Returns:
         rain_sum (mm),
-        rh_avg (%),
         soil_avg (0–1),
-        peak_dt_local (datetime or None)  # local time of max rainfall in window
+        peak_dt_local (datetime or None)  # local time of max incremental rainfall
     """
-    if any(g is None for g in grids.values()):
-        return 0.0, 0.0, 0.0, None
+    if grids is None or grids.get("APCP") is None or lats is None or lons is None:
+        return 0.0, 0.0, None
+
     points = np.column_stack((lats.ravel(), lons.ravel()))
+
     rain_vals = []
-    rh_vals = []
     soil_vals = []
-    for t in range(min(len(times), FORECAST_HOURS)):
-        # For precip: Incremental (diff from previous; assume f000=0 or handle)
+
+    n_steps = min(len(times), grids["APCP"].shape[0])
+
+    for t in range(n_steps):
+        # Incremental precipitation (difference between steps of total APCP)
+        apcp_current = griddata(points, grids["APCP"][t].ravel(), (lat, lon), method="nearest")
         if t == 0:
-            rain_inc = griddata(points, grids['APCP'][t].ravel(), (lat, lon), method='nearest')
+            rain_inc = apcp_current
         else:
-            rain_inc = griddata(points, grids['APCP'][t].ravel(), (lat, lon), method='nearest') - griddata(points, grids['APCP'][t-1].ravel(), (lat, lon), method='nearest')
-        rain_vals.append(max(0, rain_inc))  # Avoid negative artifacts
-        rh_vals.append(griddata(points, grids['RH'][t].ravel(), (lat, lon), method='nearest'))
-        soil_vals.append(griddata(points, grids['SOILW'][t].ravel(), (lat, lon), method='nearest'))
+            apcp_prev = griddata(points, grids["APCP"][t-1].ravel(), (lat, lon), method="nearest")
+            rain_inc = apcp_current - apcp_prev
+
+        rain_vals.append(max(0, float(rain_inc)))  # Avoid negative artifacts
+
+        if grids.get("SOILW") is not None:
+            soil_val = griddata(points, grids["SOILW"][t].ravel(), (lat, lon), method="nearest")
+            soil_vals.append(float(soil_val))
+
     rain_sum = sum(rain_vals)
-    rh_avg = sum(rh_vals) / len(rh_vals) if rh_vals else 0.0
-    soil_norm = [min(max(x / 0.6, 0.0), 1.0) for x in soil_vals]  # Normalize like Open-Meteo (GFS max ~0.6)
-    soil_avg = sum(soil_norm) / len(soil_norm) if soil_norm else 0.0
+
+    if soil_vals:
+        # Normalize soil moisture to 0–1 range (GFS SOILW max ~0.6)
+        soil_norm = [min(max(x / 0.6, 0.0), 1.0) for x in soil_vals]
+        soil_avg = sum(soil_norm) / len(soil_norm)
+    else:
+        soil_avg = 0.0
+
     if any(rain_vals):
-        max_idx = np.argmax(rain_vals)
-        peak_dt_utc = times[max_idx].replace(tzinfo=ZoneInfo('UTC'))
-        # Convert to local timezone (approximate; use location-specific if needed)
-        tz = ZoneInfo(TIMEZONE)  # Fallback; ideally use per-location tz
+        max_idx = int(np.argmax(rain_vals))
+        peak_dt_utc = times[max_idx].replace(tzinfo=ZoneInfo("UTC"))
+        tz = ZoneInfo(TIMEZONE)
         peak_dt_local = peak_dt_utc.astimezone(tz)
     else:
         peak_dt_local = None
-    return rain_sum, rh_avg, soil_avg, peak_dt_local
+
+    return rain_sum, soil_avg, peak_dt_local
 
 # -------------------------------
 # LINEAR MULTIPLIERS
@@ -211,31 +259,28 @@ def compute_indicators(grids, lats, lons, times, lat, lon):
 def rainfall_multiplier(rain_mm: float) -> float:
     return max(0.0, rain_mm / RAIN_UNIT_MM)
 
+
 def soil_multiplier(soil_frac: float) -> float:
     s = max(0.0, min(1.0, soil_frac))
     return SOIL_MIN_MULT + s * (SOIL_MAX_MULT - SOIL_MIN_MULT)
-
-def humidity_multiplier(rh_percent: float) -> float:
-    rh = max(0.0, min(100.0, rh_percent))
-    return HUM_MIN_MULT + (rh / 100.0) * (HUM_MAX_MULT - HUM_MIN_MULT)
 
 
 # -------------------------------
 # RISK MODEL (RAW ONLY)
 # -------------------------------
-def calculate_dynamic_risk_raw(base_risk: float, rain_mm: float, rh_percent: float, soil_frac: float):
+def calculate_dynamic_risk_raw(base_risk: float, rain_mm: float, soil_frac: float):
     """
-    Returns: (raw_score, level, r_mult, s_mult, h_mult)
-    raw_score is linear in rain, soil, humidity (multiplicative across factors).
+    Returns: (raw_score, level, r_mult, s_mult)
+    raw_score is linear in rain and soil (multiplicative across factors).
     """
     if rain_mm < RAIN_CUTOFF_MM:
-        return 0.0, "None", 0.0, soil_multiplier(0.0), humidity_multiplier(0.0)
+        # No meaningful rain in the window → no dynamic risk
+        return 0.0, "None", 0.0, soil_multiplier(0.0)
 
     r_mult = rainfall_multiplier(rain_mm)
     s_mult = soil_multiplier(soil_frac)
-    h_mult = humidity_multiplier(rh_percent)
 
-    raw_score = max(0.0, base_risk) * r_mult * s_mult * h_mult
+    raw_score = max(0.0, base_risk) * r_mult * s_mult
 
     if raw_score == 0:
         level = "None"
@@ -248,7 +293,7 @@ def calculate_dynamic_risk_raw(base_risk: float, rain_mm: float, rh_percent: flo
     else:
         level = "Extreme"
 
-    return round(raw_score, 3), level, r_mult, s_mult, h_mult
+    return round(raw_score, 3), level, r_mult, s_mult
 
 
 # -------------------------------
@@ -337,9 +382,11 @@ def load_tweeted_alerts():
             return json.load(f)
     return {}
 
+
 def save_tweeted_alerts(tweeted):
     with open(TWEET_LOG_PATH, "w", encoding="utf-8") as f:
         json.dump(tweeted, f, indent=2, ensure_ascii=False)
+
 
 def cleanup_tweeted_alerts(tweeted, valid_coords):
     """
@@ -365,6 +412,7 @@ def cleanup_tweeted_alerts(tweeted, valid_coords):
         print(f"🧹 Cleaned {len(tweeted) - len(cleaned)} outdated tweet entries.")
     return cleaned
 
+
 def tweet_alert(change_type, alert, quote_tweet_id=None):
     """Post a tweet for a new or transitioned flood alert."""
     lat, lon = alert["latitude"], alert["longitude"]
@@ -379,17 +427,14 @@ def tweet_alert(change_type, alert, quote_tweet_id=None):
         "Extreme": "🔴",
     }
 
-    # Get the appropriate color or default to ⚪
     color_emoji = level_colors.get(level, "⚪")
 
-    # Place string like "Kuantan, Malaysia"
     place = ", ".join(
         [x for x in [alert.get("name", "Location"), alert.get("country", "")] if x]
     )
 
-    # Uppercase level for the header line
     level_upper = level.upper()
-    
+
     peak_time_str = alert.get("peak_time_local_str", "unknown")
 
     tweet_text = (
@@ -398,11 +443,14 @@ def tweet_alert(change_type, alert, quote_tweet_id=None):
         f"Local Time: {peak_time_str}\n"
         f"Location: ({lat:.2f}, {lon:.2f})\n"
         f"Rain: {alert[f'rain_{FORECAST_HOURS}h_mm']:.1f} mm\n"
-        # f"Soil moisture: {alert['soil_moisture_avg']:.2f}\n"
+        f"Soil moisture: {alert['soil_moisture_avg']:.2f}\n"
         # f"Humidity: {alert['humidity_avg']}%\n"
     )
 
-    print(f"🚨 Tweet → {tweet_text}\n" + (f"(Quoting ID: {quote_tweet_id})\n" if quote_tweet_id else ""))
+    print(
+        f"🚨 Tweet → {tweet_text}\n"
+        + (f"(Quoting ID: {quote_tweet_id})\n" if quote_tweet_id else "")
+    )
 
     if not TWITTER_ENABLED:
         print("🧪 DRY RUN (tweet suppressed). Set TWITTER_ENABLED=true to send.")
@@ -420,12 +468,13 @@ def tweet_alert(change_type, alert, quote_tweet_id=None):
             text=tweet_text,
             quote_tweet_id=quote_tweet_id  # None is fine, ignored if absent
         )
-        new_tweet_id = response.data['id']
+        new_tweet_id = response.data["id"]
         print(f"✅ Tweet posted with ID: {new_tweet_id}")
         return str(new_tweet_id)  # Return as str for JSON safety
     except Exception as e:
         print(f"❌ Tweet failed: {e}")
         return None
+
 
 
 # -------------------------------
@@ -441,7 +490,7 @@ def main():
     print(f"Current working directory: {os.getcwd()}")
     if not os.path.exists(CSV_PATH):
         print(f"❌ CSV file not found: {CSV_PATH} – skipping evaluation.")
-        return  # Or handle as needed
+        return
 
     df = pd.read_csv(CSV_PATH)
     high_risk = df[df["FRisk"] > RISK_THRESHOLD].copy()
@@ -454,7 +503,7 @@ def main():
 
     # Load NOAA GFS grids once for all locations
     grids, lats, lons, times = load_gfs_grids(FORECAST_HOURS)
-    if grids is None or any(g is None for g in grids.values()):
+    if grids is None or grids.get("APCP") is None or lats is None or lons is None:
         print("❌ Failed to load GFS data – using previous alerts where available.")
         # Fallback to previous for all
         for _, row in high_risk.iterrows():
@@ -462,8 +511,7 @@ def main():
             prev_alert = prev_alerts_dict.get(key)
             if prev_alert:
                 alerts.append(prev_alert)
-            # Skip new ones
-        # Proceed with what we have
+        # Skip new ones entirely if no met data
     else:
         for _, row in high_risk.iterrows():
             lat, lon = float(row["Latitude"]), float(row["Longitude"])
@@ -471,13 +519,14 @@ def main():
             name = str(row.get("ETIQUETA", f"id_{row['JOIN_ID']}"))
             country = str(row.get("Country", "")).strip()
 
-            rain_sum, rh_avg, soil_avg, peak_dt_local = compute_indicators(grids, lats, lons, times, lat, lon)
-
-            raw_score, dyn_level, r_mult, s_mult, h_mult = calculate_dynamic_risk_raw(
-                base_risk, rain_sum, rh_avg, soil_avg
+            rain_sum, soil_avg, peak_dt_local = compute_indicators(
+                grids, lats, lons, times, lat, lon
             )
 
-            # Simple local time string like "23:00"
+            raw_score, dyn_level, r_mult, s_mult = calculate_dynamic_risk_raw(
+                base_risk, rain_sum, soil_avg
+            )
+
             if peak_dt_local is not None:
                 peak_time_local_str = peak_dt_local.strftime("%H:%M")
             else:
@@ -492,13 +541,11 @@ def main():
                 "base_risk": round(base_risk, 2),
 
                 f"rain_{FORECAST_HOURS}h_mm": round(rain_sum, 2),
-                "humidity_avg": round(rh_avg, 1),
                 "soil_moisture_avg": round(soil_avg, 3),
 
                 # Diagnostics for tuning
                 "rain_mult": round(r_mult, 3),
                 "soil_mult": round(s_mult, 3),
-                "humidity_mult": round(h_mult, 3),
 
                 "raw_dynamic_score": raw_score,
                 "dynamic_level": dyn_level,
@@ -513,7 +560,7 @@ def main():
         "source": "NOAA GFS",
         "forecast_window_hours": FORECAST_HOURS,
         "features_evaluated": len(alerts),
-        "alerts": alerts
+        "alerts": alerts,
     }
 
     # Detect level-change events
@@ -521,7 +568,7 @@ def main():
     changes = compare_alerts(prev_alerts_dict, curr_alerts_dict)
     print(f"🔍 Detected {len(changes)} level-change events.")
 
-    # 👉 Debug: list each transition with prev → current (plus key metrics)
+    # Debug: list each transition with prev → current (plus key metrics)
     if changes:
         for change_type, a in changes:
             key = (round(a["latitude"], 4), round(a["longitude"], 4))
@@ -531,7 +578,7 @@ def main():
                 f"{a['name']} [{a['latitude']:.4f},{a['longitude']:.4f}]: "
                 f"{prev_lvl} → {a['dynamic_level']} ({change_type}); "
                 f"rain={a[f'rain_{FORECAST_HOURS}h_mm']} mm, "
-                f"soil={a['soil_moisture_avg']:.3f}, RH={a['humidity_avg']}%"
+                f"soil={a['soil_moisture_avg']:.3f}"
             )
     else:
         print("ℹ️ No tweetable transitions this run (either steady level or below tweet-worthy).")
@@ -546,7 +593,6 @@ def main():
 
         # --- Downgrade gating logic ---
         if change_type == "Downgrade":
-            # If we've never tweeted this location, ignore the downgrade
             if last_entry is None:
                 print(
                     f"↘️ Skipping downgrade tweet for {key} "
@@ -554,8 +600,6 @@ def main():
                 )
                 continue
 
-            # If the last tweeted level is already Low/None (i.e. not in TWEET_LEVELS),
-            # we've already announced the downgrade for this alert cycle.
             last_level = last_entry.get("risk_level", "None")
             if last_level not in TWEET_LEVELS:
                 print(
@@ -565,26 +609,21 @@ def main():
                 )
                 continue
 
-        # -------------------------
         # Stream-wide rate limiting
-        # -------------------------
         now_ts = time.time()
         if now_ts - last_tweet_ts < MIN_SECONDS_BETWEEN_TWEETS:
             time.sleep(MIN_SECONDS_BETWEEN_TWEETS - (now_ts - last_tweet_ts))
 
-        # --- Quote logic: Use previous tweet ID if available (for upgrades/downgrades) ---
+        # Quote logic: Use previous tweet ID if available (for upgrades/downgrades)
         quote_tweet_id = None
         if change_type in ["Upgrade", "Downgrade"] and last_entry and "tweet_id" in last_entry:
             quote_tweet_id = last_entry["tweet_id"]
 
-        # Send tweet (or DRY RUN printout), capture new ID
         new_tweet_id = tweet_alert(change_type, alert, quote_tweet_id=quote_tweet_id)
         last_tweet_ts = time.time()
 
-        # --- Update tweeted_alerts.json according to the new level ---
-        if new_tweet_id:  # Only update if tweet succeeded
+        if new_tweet_id:
             if current_level in TWEET_LEVELS:
-                # Still Medium / High / Extreme → keep or create/update entry
                 tweeted_alerts[key] = {
                     "country": alert.get("country", ""),
                     "name": alert["name"],
@@ -592,14 +631,12 @@ def main():
                     "latitude": alert["latitude"],
                     "longitude": alert["longitude"],
                     "rain_mm": alert[f"rain_{FORECAST_HOURS}h_mm"],
-                    "humidity": alert["humidity_avg"],
                     "soil_moisture": alert["soil_moisture_avg"],
                     "raw_dynamic_score": alert["raw_dynamic_score"],
                     "last_updated": datetime.now(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z"),
-                    "tweet_id": new_tweet_id  # NEW: Store/update the latest tweet ID
+                    "tweet_id": new_tweet_id,
                 }
             else:
-                # Downgrade into Low / None → keep it ONE more run as 'resolved'
                 print(
                     f"✅ Marking alert as resolved in tweet log: "
                     f"{alert['name']} [{key}] (→ {current_level})"
@@ -612,12 +649,11 @@ def main():
                     "latitude": alert["latitude"],
                     "longitude": alert["longitude"],
                     "rain_mm": alert[f"rain_{FORECAST_HOURS}h_mm"],
-                    "humidity": alert["humidity_avg"],
                     "soil_moisture": alert["soil_moisture_avg"],
                     "raw_dynamic_score": alert["raw_dynamic_score"],
                     "last_updated": datetime.now(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z"),
-                    "resolved": True,  # <-- flag for next run's cleanup
-                    "tweet_id": new_tweet_id  # NEW: Store the downgrade tweet ID (optional, but keeps chain info)
+                    "resolved": True,
+                    "tweet_id": new_tweet_id,
                 }
 
     save_tweeted_alerts(tweeted_alerts)
@@ -629,9 +665,11 @@ def main():
     with open(COMPARISON_PATH, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
 
-    print(f"✅ Completed in {round((time.time() - start_time)/60, 1)} min. "
-          f"Updated {COMPARISON_PATH} and {TWEET_LOG_PATH}.")
+    print(
+        f"✅ Completed in {round((time.time() - start_time)/60, 1)} min. "
+        f"Updated {COMPARISON_PATH} and {TWEET_LOG_PATH}."
+    )
 
-# -------------------------------
+
 if __name__ == "__main__":
     main()
