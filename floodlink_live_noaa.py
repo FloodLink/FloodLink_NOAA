@@ -541,7 +541,7 @@ def main():
     
             lat, lon = float(row["Latitude"]), float(row["Longitude"])
             base_risk = float(row["FRisk"])
-            name = str(row.get("ETIQUETA", f"id_{row['JOIN_ID']}"))
+            name = str(row.get("Name", f"id_{row['JOIN_ID']}"))
             country = str(row.get("Country", "")).strip()
     
             rain_sum, soil_avg, peak_dt_local = compute_indicators(
