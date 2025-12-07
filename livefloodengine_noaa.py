@@ -204,14 +204,10 @@ def load_gfs_grids(forecast_hours):
         for var in VARIABLES:
             if var == "SOILW":
                 try:
-                    msg = grb.select(
-                        name="Volumetric soil moisture content",
-                        typeOfLevel="depthBelowLandLayer",
-                        bottomLevel=0.1,
-                        topLevel=0
-                    )[0]
+                    # After filtering with lev_0-0.1_m_below_ground, there should be a single soilw field
+                    msg = grb.select(shortName="soilw")[0]
                 except ValueError:
-                    print(f"⚠️ No SOILW field in {file}, skipping soil moisture for this step.")
+                    print(f"⚠️ No SOILW (soilw) field in {file}, skipping soil moisture for this step.")
                     continue
             else:  # APCP (total precipitation)
                 msg = grb.select(name="Total Precipitation")[0]
