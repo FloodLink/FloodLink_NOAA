@@ -492,7 +492,7 @@ def tweet_alert(change_type, alert, quote_tweet_id=None):
         f"Local Time: {peak_time_str}\n"
         f"Location: ({lat:.2f}, {lon:.2f})\n"
         f"Rain: {alert[f'rain_{FORECAST_HOURS}h_mm']:.1f} mm\n"
-        # f"Soil moisture: {alert['soil_moisture_avg']:.2f}\n"
+        f"Soil moisture: {alert['soil_moisture_avg']:.2f}\n"
         # f"Humidity: {alert['humidity_avg']}%\n"
     )
 
