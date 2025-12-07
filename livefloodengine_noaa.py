@@ -3,7 +3,7 @@ FloodLink – Live Flood Risk Evaluator (RAW + Linear)
 Evaluates high-risk features from Citiesglobal.csv using NOAA GFS forecasts.
 
 Now includes:
-- NOAA GFS 0.5° grids (bulk download, single pass for all points)
+- NOAA GFS 0.25° grids (bulk download, single pass for all points)
 - Configurable forecast horizon (3h, 6h, 12h, etc.)
 - Linear, unit-aware multipliers (rain unbounded; soil clipped)
 - RAW score only (no compression)
@@ -24,7 +24,6 @@ import tweepy
 from requests.exceptions import RequestException, ReadTimeout, ConnectionError
 
 import numpy as np
-from scipy.interpolate import griddata
 import pygrib
 
 # -------------------------------
@@ -231,22 +230,51 @@ def load_gfs_grids(forecast_hours):
 
     return grids, lats, lons, times
 
+def precompute_city_indices(lats, lons, df):
+    """
+    Precompute nearest grid indices (ilat, ilon) for each city.
+
+    Assumes:
+      - lats, lons are 2D arrays from pygrib (same shape).
+      - df has columns 'Latitude', 'Longitude', 'JOIN_ID'.
+    """
+    # 1D lat / lon axes (since grid is regular)
+    lat_axis = lats[:, 0]
+    lon_axis = lons[0, :]
+
+    idx_map = {}
+
+    for _, row in df.iterrows():
+        lat = float(row["Latitude"])
+        lon = float(row["Longitude"])
+
+        # Handle 0–360 vs -180–180 if needed (GFS is 0–360)
+        if np.any(lon_axis > 180):
+            if lon < 0:
+                lon = lon + 360.0
+
+        ilat = int(np.argmin(np.abs(lat_axis - lat)))
+        ilon = int(np.argmin(np.abs(lon_axis - lon)))
+
+        idx_map[row["JOIN_ID"]] = (ilat, ilon)
+
+    return idx_map
+
+
 # -------------------------------
 # WEATHER INDICATORS
 # -------------------------------
-def compute_indicators(grids, lats, lons, times, lat, lon):
+def compute_indicators_at_index(grids, times, ilat, ilon):
     """
-    Use the available GFS grids to compute indicators for a point.
+    Compute indicators for a point given its precomputed grid indices.
 
     Returns:
         rain_sum (mm),
         soil_avg (0–1),
-        peak_dt_local (datetime or None)  # local time of max incremental rainfall
+        peak_dt_local (datetime or None)
     """
-    if grids is None or grids.get("APCP") is None or lats is None or lons is None:
+    if grids is None or grids.get("APCP") is None:
         return 0.0, 0.0, None
-
-    points = np.column_stack((lats.ravel(), lons.ravel()))
 
     rain_vals = []
     soil_vals = []
@@ -254,24 +282,22 @@ def compute_indicators(grids, lats, lons, times, lat, lon):
     n_steps = min(len(times), grids["APCP"].shape[0])
 
     for t in range(n_steps):
-        # Incremental precipitation from cumulative APCP
-        apcp_current = griddata(points, grids["APCP"][t].ravel(), (lat, lon), method="nearest")
+        apcp_current = float(grids["APCP"][t, ilat, ilon])
         if t == 0:
             rain_inc = apcp_current
         else:
-            apcp_prev = griddata(points, grids["APCP"][t - 1].ravel(), (lat, lon), method="nearest")
+            apcp_prev = float(grids["APCP"][t - 1, ilat, ilon])
             rain_inc = apcp_current - apcp_prev
 
-        rain_vals.append(max(0, float(rain_inc)))  # avoid negative artifacts
+        rain_vals.append(max(0.0, rain_inc))
 
         if grids.get("SOILW") is not None:
-            soil_val = griddata(points, grids["SOILW"][t].ravel(), (lat, lon), method="nearest")
-            soil_vals.append(float(soil_val))
+            soil_val = float(grids["SOILW"][t, ilat, ilon])
+            soil_vals.append(soil_val)
 
     rain_sum = sum(rain_vals)
 
     if soil_vals:
-        # Normalize soil moisture to 0–1 (GFS SOILW typical max ~0.6)
         soil_norm = [min(max(x / 0.6, 0.0), 1.0) for x in soil_vals]
         soil_avg = sum(soil_norm) / len(soil_norm)
     else:
@@ -286,6 +312,7 @@ def compute_indicators(grids, lats, lons, times, lat, lon):
         peak_dt_local = None
 
     return rain_sum, soil_avg, peak_dt_local
+
 
 
 # -------------------------------
@@ -555,24 +582,33 @@ def main():
                 alerts.append(prev_alert)
         # If no GFS at all, we don't invent new alerts
     else:
+        # Precompute nearest grid indices (only for high-risk rows to save a bit of work)
+        idx_map = precompute_city_indices(lats, lons, high_risk)
+
         total = len(high_risk)
         for idx, (_, row) in enumerate(high_risk.iterrows(), start=1):
             if idx % 100 == 0 or idx == total:
                 print(f"… processed {idx}/{total} high-risk cities")
 
-            lat, lon = float(row["Latitude"]), float(row["Longitude"])
+            lat = float(row["Latitude"])
+            lon = float(row["Longitude"])
             base_risk = float(row["FRisk"])
 
             # Name priority: Name -> ETIQUETA -> JOIN_ID fallback
-            name = (
-                str(row.get("Name"))
-                if "Name" in row and pd.notna(row["Name"])
-                else str(row.get("ETIQUETA", f"id_{row['JOIN_ID']}"))
-            )
+            if "Name" in row and pd.notna(row["Name"]):
+                name = str(row["Name"])
+            elif "ETIQUETA" in row and pd.notna(row["ETIQUETA"]):
+                name = str(row["ETIQUETA"])
+            else:
+                name = f"id_{row['JOIN_ID']}"
+
             country = str(row.get("Country", "")).strip()
 
-            rain_sum, soil_avg, peak_dt_local = compute_indicators(
-                grids, lats, lons, times, lat, lon
+            # Retrieve indices for this city (JOIN_ID assumed unique)
+            ilat, ilon = idx_map[row["JOIN_ID"]]
+
+            rain_sum, soil_avg, peak_dt_local = compute_indicators_at_index(
+                grids, times, ilat, ilon
             )
 
             raw_score, dyn_level, r_mult, s_mult = calculate_dynamic_risk_raw(
@@ -602,6 +638,7 @@ def main():
                 "dynamic_level": dyn_level,
                 "peak_time_local_str": peak_time_local_str,
             })
+
 
     # Persist current results
     result = {
