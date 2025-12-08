@@ -479,9 +479,19 @@ def tweet_alert(change_type, alert, quote_tweet_id=None):
 
     color_emoji = level_colors.get(level, "⚪")
 
-    place = ", ".join(
-        [x for x in [alert.get("name", "Location"), alert.get("country", "")] if x]
-    )
+    name    = alert.get("name", "Location")
+    country = alert.get("country", "")
+    flag    = alert.get("country_flag", "")
+
+    # Choose layout:
+    # 🟠 HIGH FLOOD RISK –  🇧🇳 Liang, Brunei Darussalam
+    if country:
+        if flag:
+            place = f"{flag} {name}, {country}"
+        else:
+            place = f"{name}, {country}"
+    else:
+        place = name
 
     level_upper = level.upper()
     peak_time_str = alert.get("peak_time_local_str", "unknown")
@@ -599,6 +609,7 @@ def main():
                 name = f"id_{row['JOIN_ID']}"
 
             country = str(row.get("Country", "")).strip()
+            country_flag = str(row.get("CountryFlag", "")).strip()
 
             # Retrieve indices for this city (JOIN_ID assumed unique)
             ilat, ilon = idx_map[row["JOIN_ID"]]
@@ -619,6 +630,7 @@ def main():
             alerts.append({
                 "id": str(row["JOIN_ID"]),
                 "country": country,
+                "country_flag": country_flag,
                 "name": name,
                 "latitude": lat,
                 "longitude": lon,
