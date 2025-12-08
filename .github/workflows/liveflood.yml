@@ -22,7 +22,7 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
       # ✅ enable live tweets
-      TWITTER_ENABLED: "false"
+      TWITTER_ENABLED: "true"
       
       # ⚠️ Use GitHub Secrets for keys
       TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
