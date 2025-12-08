@@ -29,7 +29,7 @@ import pygrib
 # -------------------------------
 # CONFIGURATION
 # -------------------------------
-CSV_PATH = "Citiesglobal.csv"
+CSV_PATH = "cities15000.csv"
 COMPARISON_PATH = "alerts_comparison.json"   # single source of truth
 TWEET_LOG_PATH = "tweeted_alerts.json"       # map-ready tweet history
 
@@ -59,10 +59,10 @@ SOIL_MAX_MULT  = 1.8         # soil=1 -> 1.8×
 RAIN_CUTOFF_MM = 0.0         # set 0.5 to ignore drizzle; 0.0 keeps strict linearity
 
 # RAW alert bands (tune later or learn from rolling percentiles)
-RAW_LOW_MAX   = 5.0          # 0..5   -> Low
-RAW_MED_MAX   = 15.0         # 5..15  -> Medium
-RAW_HIGH_MAX  = 35.0         # 15..35 -> High
-# >35 -> Extreme
+RAW_LOW_MAX   = 7.0          # 0..7   -> Low
+RAW_MED_MAX   = 12.0         # 7..12  -> Medium
+RAW_HIGH_MAX  = 24.0         # 12..24 -> High
+# >24 -> Extreme
 
 # -------------------------------
 # ALERT TRANSITION POLICY
