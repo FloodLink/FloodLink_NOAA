@@ -1,0 +1,62 @@
+{
+  "4.6775,114.4959": {
+    "country": "Brunei Darussalam",
+    "name": "Liang",
+    "risk_level": "High",
+    "latitude": 4.67747,
+    "longitude": 114.49587,
+    "rain_mm": 80.56,
+    "soil_moisture": 1.0,
+    "raw_dynamic_score": 12.326,
+    "last_updated": "2025-12-08T22:44:53.296305Z",
+    "tweet_id": "1998161889629474918"
+  },
+  "-22.0789,-54.7894": {
+    "country": "Brazil",
+    "name": "Itaporã",
+    "risk_level": "Medium",
+    "latitude": -22.07889,
+    "longitude": -54.78944,
+    "rain_mm": 56.5,
+    "soil_moisture": 0.622,
+    "raw_dynamic_score": 7.101,
+    "last_updated": "2025-12-08T22:45:23.525491Z",
+    "tweet_id": "1998162016410694001"
+  },
+  "-22.2211,-54.8056": {
+    "country": "Brazil",
+    "name": "Dourados",
+    "risk_level": "Medium",
+    "latitude": -22.22111,
+    "longitude": -54.80556,
+    "rain_mm": 81.44,
+    "soil_moisture": 0.627,
+    "raw_dynamic_score": 10.265,
+    "last_updated": "2025-12-08T22:45:53.704451Z",
+    "tweet_id": "1998162143003250727"
+  },
+  "-22.3742,-54.5139": {
+    "country": "Brazil",
+    "name": "Fátima do Sul",
+    "risk_level": "Medium",
+    "latitude": -22.37417,
+    "longitude": -54.51389,
+    "rain_mm": 67.38,
+    "soil_moisture": 0.617,
+    "raw_dynamic_score": 8.445,
+    "last_updated": "2025-12-08T22:46:23.959316Z",
+    "tweet_id": "1998162269876732208"
+  },
+  "4.3993,113.9916": {
+    "country": "Malaysia",
+    "name": "Miri",
+    "risk_level": "Medium",
+    "latitude": 4.39928,
+    "longitude": 113.99163,
+    "rain_mm": 73.0,
+    "soil_moisture": 1.0,
+    "raw_dynamic_score": 11.169,
+    "last_updated": "2025-12-08T22:46:54.179676Z",
+    "tweet_id": "1998162396628582693"
+  }
+}
