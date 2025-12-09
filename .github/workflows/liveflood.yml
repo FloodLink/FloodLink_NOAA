@@ -1,8 +1,8 @@
-name: 🌧️ FloodLink Cluster-NOAA Live Risk Engine 
+name: 🌧️ FloodLink 2-NOAA Live Risk Engine
 
 on:
   schedule:
-    - cron: "0 */1 * * *"   # every 1 hour
+    - cron: "0 */1 * * *"   # every 1 hours
   workflow_dispatch:
 
 permissions:
@@ -10,7 +10,7 @@ permissions:
 
 # avoid concurrent runs stepping on each other
 concurrency:
-  group: floodlink-live-cluster
+  group: floodlink-live
   cancel-in-progress: true
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
       # 👇 force unbuffered stdout so logs stream live
       PYTHONUNBUFFERED: "1"
 
-      # ✅ enable live tweets (set to "false" for dry runs)
+      # ✅ enable live tweets
       TWITTER_ENABLED: "true"
       
       # ⚠️ Use GitHub Secrets for keys
@@ -51,13 +51,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas requests tweepy tzdata pygrib numpy scipy
 
-      - name: 🌧️ Run FloodLink Cluster Engine
+      - name: 🌧️ Run FloodLink Live Engine
         run: |
-          echo "Starting live flood risk evaluation (cluster version)..."
+          echo "Starting live flood risk evaluation..."
           echo "TWITTER_ENABLED=$TWITTER_ENABLED"
-          python -u livefloodengine_cluster.py
+          python -u livefloodengine_noaa.py   # ⬅️ change this if your file name is different
 
-      - name: 💾 Commit and push updated alerts JSON (cluster)
+      - name: 💾 Commit and push updated alerts JSON
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -69,17 +69,17 @@ jobs:
           git fetch origin
           git pull --rebase --autostash origin main
           
-          # 2) Always add the main cluster JSON files
-          git add alerts_comparison_cluster.json tweeted_alerts_cluster.json || true
+          # 2) Always add the main JSON files (they are created/updated every run)
+          git add alerts_comparison.json tweeted_alerts.json || true
           
-          # 3) Add snapshot files if they exist (cluster versions)
-          if ls alerts_comparison_cluster_*.json 1> /dev/null 2>&1; then
-            git add alerts_comparison_cluster_*.json
+          # 3) Add snapshot files if they exist
+          if ls alerts_comparison_*.json 1> /dev/null 2>&1; then
+            git add alerts_comparison_*.json
           fi
           
           # 4) Commit only if there are staged changes
           if ! git diff --cached --quiet; then
-            git commit -m "🌧️ Auto-update: cluster flood risk alerts ($(date -u +'%Y-%m-%dT%H:%M:%SZ'))"
+            git commit -m "🌧️ Auto-update: flood risk alerts ($(date -u +'%Y-%m-%dT%H:%M:%SZ'))"
             git push origin main
           else
             echo "No JSON changes to commit."
