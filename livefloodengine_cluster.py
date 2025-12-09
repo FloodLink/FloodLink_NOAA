@@ -361,17 +361,20 @@ def rotate_comparison_snapshots(max_history=COMPARISON_HISTORY):
     Rotate alerts_comparison snapshots.
     """
     base = COMPARISON_PATH
+    root, ext = os.path.splitext(base)  # e.g. "alerts_comparison_cluster", ".json"
 
+    # Shift older snapshots up one index
     for i in range(max_history - 1, 0, -1):
-        older = f"alerts_comparison_{i}.json"
-        newer = f"alerts_comparison_{i + 1}.json"
+        older = f"{root}_{i}{ext}"
+        newer = f"{root}_{i + 1}{ext}"
         if os.path.exists(older):
             if os.path.exists(newer):
                 os.remove(newer)
             os.replace(older, newer)
 
+    # Move current base file to _1
     if os.path.exists(base):
-        first_snapshot = "alerts_comparison_1.json"
+        first_snapshot = f"{root}_1{ext}"
         if os.path.exists(first_snapshot):
             os.remove(first_snapshot)
         os.replace(base, first_snapshot)
