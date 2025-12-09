@@ -2,13 +2,25 @@
   "-28.6440,-53.6063": {
     "country": "Brazil",
     "name": "Cruz Alta",
-    "risk_level": "Medium",
+    "risk_level": "Low",
     "latitude": -28.64397,
     "longitude": -53.60633,
-    "rain_mm": 59.38,
-    "soil_moisture": 0.629,
-    "raw_dynamic_score": 7.492,
-    "last_updated": "2025-12-09T14:28:33.792328Z",
-    "tweet_id": "1998399373152260488"
+    "rain_mm": 6.62,
+    "soil_moisture": 0.618,
+    "raw_dynamic_score": 0.831,
+    "last_updated": "2025-12-09T16:17:21.187283Z",
+    "tweet_id": "1998426751131914493"
+  },
+  "1.7402,98.7812": {
+    "country": "Indonesia",
+    "name": "Sibolga",
+    "risk_level": "Medium",
+    "latitude": 1.74016,
+    "longitude": 98.78117,
+    "rain_mm": 65.25,
+    "soil_moisture": 1.0,
+    "raw_dynamic_score": 9.983,
+    "last_updated": "2025-12-09T16:17:51.391629Z",
+    "tweet_id": "1998426877690818770"
   }
 }
