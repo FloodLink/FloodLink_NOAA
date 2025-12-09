@@ -8,9 +8,12 @@ Now includes:
 - Linear, unit-aware multipliers (rain unbounded; soil clipped)
 - RAW score only (no compression)
 - Level-transition alerts only (Medium↔High, High↔Extreme; downgrades toggle)
-- Single-file comparison (alerts_comparison.json)
-- Rich Tweet Tracker (tweeted_alerts.json)
+- Single-file comparison (alerts_comparison_cluster.json)
+- Rich Tweet Tracker (tweeted_alerts_cluster.json)
 - Region-level grouping: 1 tweet per (country, region) per run
+- Repost behaviour restored:
+    * Upgrades & downgrades only if there was a previous tweet
+    * Upgrades & downgrades quote the previous tweet (threading)
 """
 
 import os
@@ -71,7 +74,7 @@ RAW_HIGH_MAX  = 24.0         # 12..24 -> High
 # -------------------------------
 TWEET_LEVELS = ["Medium", "High", "Extreme"]   # which levels are tweet-worthy at all
 ALERT_ON_UPGRADES   = True                     # Medium→High, High→Extreme
-ALERT_ON_DOWNGRADES = True                     # High→Medium, Extreme→High
+ALERT_ON_DOWNGRADES = True                     # High→Medium, Extreme→High (and lower)
 
 LEVELS = ["None", "Low", "Medium", "High", "Extreme"]
 
@@ -124,18 +127,17 @@ def get_forecast_steps(max_hours: int):
         step = 3
         return list(range(step, max_hours + 1, step))
     else:
-        # 0p25 → hourly
+        # 0.25° → hourly
         return list(range(1, max_hours + 1))
 
 
 def download_gfs_file(date, cycle, fhr):
     base_url = f"https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_{GFS_RES}.pl"
 
-    # File naming differs between 0p50 "full" grid and 0p25 standard grid
+    # File naming differs between 0p50 "full" grid and 0.25° standard grid
     if GFS_RES == "0p50":
         file_name = f"gfs.t{cycle}z.pgrb2full.0p50.f{fhr:03d}"
     else:
-        # 0.25° (and 1.0°) common fields
         file_name = f"gfs.t{cycle}z.pgrb2.{GFS_RES}.f{fhr:03d}"
 
     params = {
@@ -143,7 +145,7 @@ def download_gfs_file(date, cycle, fhr):
         "file": file_name,
     }
 
-    # Global domain (you can narrow this later)
+    # Global domain
     params.update({
         "leftlon": 0,
         "rightlon": 360,
@@ -195,7 +197,6 @@ def load_gfs_grids(forecast_hours):
     for fhr in forecast_steps:
         file = download_gfs_file(date, cycle, fhr)
         if file is None:
-            # Fallback to previous cycle
             file = download_gfs_file(prev_date, prev_cycle, fhr)
             if file is None:
                 print(f"⚠️ Skipping f{fhr:03d} – unable to download from both cycles.")
@@ -205,23 +206,21 @@ def load_gfs_grids(forecast_hours):
         for var in VARIABLES:
             if var == "SOILW":
                 try:
-                    # After filtering with lev_0-0.1_m_below_ground, there should be a single soilw field
                     msg = grb.select(shortName="soilw")[0]
                 except ValueError:
-                    print(f"⚠️ No SOILW (soilw) field in {file}, skipping soil moisture for this step.")
+                    print(f"⚠️ No SOILW field in {file}, skipping soil moisture for this step.")
                     continue
-            else:  # APCP (total precipitation)
+            else:
                 msg = grb.select(name="Total Precipitation")[0]
 
             grids[var].append(msg.values)
             if lats is None:
                 lats, lons = msg.latlons()
 
-        times.append(msg.validDate)  # UTC time of this forecast step
+        times.append(msg.validDate)  # UTC
         grb.close()
         os.remove(file)
 
-    # Stack into 3D arrays [time, lat, lon]
     for var in grids:
         grids[var] = np.stack(grids[var]) if grids[var] else None
 
@@ -231,22 +230,16 @@ def load_gfs_grids(forecast_hours):
 def precompute_city_indices(lats, lons, df):
     """
     Precompute nearest grid indices (ilat, ilon) for each city.
-
-    Assumes:
-      - lats, lons are 2D arrays from pygrib (same shape).
-      - df has columns 'Latitude', 'Longitude', 'JOIN_ID'.
     """
-    # 1D lat / lon axes (since grid is regular)
     lat_axis = lats[:, 0]
     lon_axis = lons[0, :]
 
     idx_map = {}
-
     for _, row in df.iterrows():
         lat = float(row["Latitude"])
         lon = float(row["Longitude"])
 
-        # Handle 0–360 vs -180–180 if needed (GFS is 0–360)
+        # Handle 0–360 vs -180–180 if needed
         if np.any(lon_axis > 180):
             if lon < 0:
                 lon = lon + 360.0
@@ -330,10 +323,8 @@ def soil_multiplier(soil_frac: float) -> float:
 def calculate_dynamic_risk_raw(base_risk: float, rain_mm: float, soil_frac: float):
     """
     Returns: (raw_score, level, r_mult, s_mult)
-    raw_score is linear in rain and soil (multiplicative across factors).
     """
     if rain_mm < RAIN_CUTOFF_MM:
-        # No meaningful rain in the window → no dynamic risk
         return 0.0, "None", 0.0, soil_multiplier(0.0)
 
     r_mult = rainfall_multiplier(rain_mm)
@@ -367,16 +358,9 @@ def load_json(path):
 
 def rotate_comparison_snapshots(max_history=COMPARISON_HISTORY):
     """
-    Rotate alerts_comparison snapshots:
-
-      alerts_comparison_{max_history-1}.json -> alerts_comparison_{max_history}.json
-      ...
-      alerts_comparison_1.json -> alerts_comparison_2.json
-      alerts_comparison.json   -> alerts_comparison_1.json
-
-    The new current run will then be written to alerts_comparison.json.
+    Rotate alerts_comparison snapshots.
     """
-    base = COMPARISON_PATH  # "alerts_comparison.json"
+    base = COMPARISON_PATH
 
     for i in range(max_history - 1, 0, -1):
         older = f"alerts_comparison_{i}.json"
@@ -401,8 +385,8 @@ def compare_alerts(prev, curr):
     """
     Tweet when:
       • First time we see a site at a tweet-worthy level (Medium/High/Extreme)
-      • Any UPGRADE into a tweet-worthy level (e.g., None→Medium, Low→Medium, Medium→High, High→Extreme)
-      • (Optional) Downgrades if enabled
+      • Any UPGRADE into a tweet-worthy level
+      • Downgrades from tweet-worthy levels (optional)
     """
     changes = []
     for key, c in curr.items():
@@ -425,7 +409,7 @@ def compare_alerts(prev, curr):
             changes.append(("Upgrade", c))
             continue
 
-        # Downgrades from tweet-worthy levels (optional)
+        # Downgrades from tweet-worthy levels (prev in tweet-levels)
         if ALERT_ON_DOWNGRADES and cur_i < prev_i and prev_lvl in TWEET_LEVELS:
             changes.append(("Downgrade", c))
 
@@ -449,9 +433,7 @@ def save_tweeted_alerts(tweeted):
 
 def cleanup_tweeted_alerts(tweeted, valid_coords):
     """
-    Keep only:
-      - coordinates that still exist in the CSV, AND
-      - entries NOT marked as resolved.
+    Keep only coordinates that still exist in the CSV and are not resolved.
     """
     cleaned = {}
     for k, v in tweeted.items():
@@ -496,8 +478,6 @@ def tweet_alert(change_type, alert, quote_tweet_id=None):
     country = alert.get("country", "")
     flag    = alert.get("country_flag", "")
 
-    # Example layout:
-    # 🟠 HIGH FLOOD RISK –  🇧🇳 Liang, Brunei Darussalam
     if country:
         if flag:
             place = f"{flag} {name}, {country}"
@@ -571,7 +551,6 @@ def cluster_stats(alerts_in_region):
     peak_rain = max(rains)
     soil_min, soil_max = min(soils), max(soils)
 
-    # Take time of wettest city as representative
     max_i = max(
         range(len(alerts_in_region)),
         key=lambda i: alerts_in_region[i][1][f"rain_{FORECAST_HOURS}h_mm"],
@@ -595,30 +574,23 @@ def cluster_city_list(alerts_in_region):
     return ", ".join(names)
 
 
-def tweet_region_cluster(region_key, alerts_in_region, client=None):
+def tweet_region_cluster(region_key, alerts_in_region, client=None,
+                         change_type=None, quote_tweet_id=None):
     """
-    Compose and send a tweet for a region.
+    Compose and send a tweet for a region (multi-city only).
 
-    - If there's only ONE city in this region:
-        → use the classic single-location style (via tweet_alert).
-    - If there are MULTIPLE cities:
-        → region style:
-           🟠 HIGH FLOOD RISK – 🇧🇷 Mato Grosso do Sul, Brazil
-           Key locations: city1, city2, ...
-           Local time (approx.): ...
-           Peak rain ...
-           Soil moisture range ...
+    Region style:
+       🟠 HIGH FLOOD RISK – 🇧🇷 Mato Grosso do Sul, Brazil
+       Type: Upgrade
+       Key locations: city1, city2, ...
+       Local time (approx.): ...
+       Peak rain ...
+       Soil moisture range ...
     """
-    # --- 1) Single-city case → classic style ---
-    if len(alerts_in_region) == 1:
-        change_type, alert = alerts_in_region[0]
-        # classic per-point tweet (no "cluster", includes coords, etc.)
-        return tweet_alert(change_type, alert, quote_tweet_id=None)
-
-    # --- 2) Multi-city case → region style ---
     country, region = region_key
     cluster_lvl = cluster_level(alerts_in_region)
-    change_type = cluster_change_type(alerts_in_region)
+    if change_type is None:
+        change_type = cluster_change_type(alerts_in_region)
     peak_rain, soil_min, soil_max, peak_time = cluster_stats(alerts_in_region)
     key_locs = cluster_city_list(alerts_in_region)
 
@@ -631,7 +603,6 @@ def tweet_region_cluster(region_key, alerts_in_region, client=None):
     }
     color_emoji = level_colors.get(cluster_lvl, "⚪")
 
-    # Use any alert to get flag
     sample_alert = alerts_in_region[0][1]
     flag = sample_alert.get("country_flag", "")
 
@@ -642,7 +613,6 @@ def tweet_region_cluster(region_key, alerts_in_region, client=None):
     else:
         header_place = region or "Region"
 
-    # NOTE: no "CLUSTER" word, no Severity line
     tweet_text = (
         f"{color_emoji} {cluster_lvl.upper()} FLOOD RISK – {header_place}\n\n"
         f"Type: {change_type}\n"
@@ -652,7 +622,8 @@ def tweet_region_cluster(region_key, alerts_in_region, client=None):
         f"Soil moisture range: {soil_min:.2f}–{soil_max:.2f}"
     )
 
-    print(f"🚨 Region tweet →\n{tweet_text}\n")
+    print(f"🚨 Region tweet →\n{tweet_text}\n"
+          + (f"(Quoting ID: {quote_tweet_id})\n" if quote_tweet_id else ""))
 
     if not TWITTER_ENABLED:
         print("🧪 DRY RUN (tweet suppressed). Set TWITTER_ENABLED=true to send.")
@@ -661,7 +632,7 @@ def tweet_region_cluster(region_key, alerts_in_region, client=None):
     try:
         if client is None:
             client = create_client()
-        response = client.create_tweet(text=tweet_text)
+        response = client.create_tweet(text=tweet_text, quote_tweet_id=quote_tweet_id)
         new_tweet_id = response.data["id"]
         print(f"✅ Region tweet posted with ID: {new_tweet_id}")
         return str(new_tweet_id)
@@ -687,7 +658,7 @@ def main():
 
     df = pd.read_csv(CSV_PATH)
 
-    # --- Basic CSV + FRisk summary (helps you verify coverage) ---
+    # --- Basic CSV + FRisk summary ---
     print("📊 CSV summary:")
     print(f"  Total rows: {len(df)}")
     if "FRisk" in df.columns:
@@ -698,7 +669,6 @@ def main():
     high_risk = df[df["FRisk"] > RISK_THRESHOLD].copy()
     print(f"  High-risk rows (FRisk > {RISK_THRESHOLD}): {len(high_risk)}")
 
-    # Optional FAST MODE for testing
     FAST_MODE = False
     FAST_SAMPLE = 200
     if FAST_MODE and not high_risk.empty:
@@ -720,12 +690,10 @@ def main():
             prev_alert = prev_alerts_dict.get(key)
             if prev_alert:
                 alerts.append(prev_alert)
-        # If no GFS at all, we don't invent new alerts
     else:
-        # Precompute nearest grid indices (only for high-risk rows to save a bit of work)
         idx_map = precompute_city_indices(lats, lons, high_risk)
-
         total = len(high_risk)
+
         for idx, (_, row) in enumerate(high_risk.iterrows(), start=1):
             if idx % 100 == 0 or idx == total:
                 print(f"… processed {idx}/{total} high-risk cities")
@@ -734,7 +702,6 @@ def main():
             lon = float(row["Longitude"])
             base_risk = float(row["FRisk"])
 
-            # Name priority: Name -> ETIQUETA -> JOIN_ID fallback
             if "Name" in row and pd.notna(row["Name"]):
                 name = str(row["Name"])
             elif "ETIQUETA" in row and pd.notna(row["ETIQUETA"]):
@@ -744,9 +711,8 @@ def main():
 
             country = str(row.get("Country", "")).strip()
             country_flag = str(row.get("CountryFlag", "")).strip()
-            region = str(row.get("region", "")).strip()  # from enriched CSV
+            region = str(row.get("region", "")).strip()
 
-            # Retrieve indices for this city (JOIN_ID assumed unique)
             ilat, ilon = idx_map[row["JOIN_ID"]]
 
             rain_sum, soil_avg, peak_dt_local = compute_indicators_at_index(
@@ -783,7 +749,7 @@ def main():
                 "peak_time_local_str": peak_time_local_str,
             })
 
-    # Persist current results (city-level alerts with region field)
+    # Persist current results
     result = {
         "timestamp": datetime.now(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z"),
         "source": "NOAA GFS",
@@ -792,7 +758,7 @@ def main():
         "alerts": alerts,
     }
 
-    # Detect level-change events (point-level)
+    # Detect level-change events
     curr_alerts_dict = build_alert_dict(alerts)
     changes = compare_alerts(prev_alerts_dict, curr_alerts_dict)
     print(f"🔍 Detected {len(changes)} level-change events.")
@@ -809,12 +775,11 @@ def main():
                 f"soil={a['soil_moisture_avg']:.3f}"
             )
     else:
-        print("ℹ️ No tweetable transitions this run (either steady level or below tweet-worthy).")
+        print("ℹ️ No tweetable transitions this run.")
 
     # -----------------------
     # REGION-LEVEL TWEETS
     # -----------------------
-    # Group all city-level changes by (country, region)
     region_clusters = defaultdict(list)
     for change_type, alert in changes:
         region = alert.get("region", "") or ""
@@ -828,26 +793,46 @@ def main():
     client = create_client() if TWITTER_ENABLED else None
 
     for region_key, alerts_in_region in region_clusters.items():
-        # Respect downgrade toggle at cluster level
-        ctype = cluster_change_type(alerts_in_region)
-        if ctype == "Downgrade" and not ALERT_ON_DOWNGRADES:
-            continue
+        # Single-location region → classic per-point behaviour
+        if len(alerts_in_region) == 1:
+            change_type, alert = alerts_in_region[0]
+            coord_key = f"{alert['latitude']:.4f},{alert['longitude']:.4f}"
+            last_entry = tweeted_alerts.get(coord_key)
 
-        now_ts = time.time()
-        if now_ts - last_tweet_ts < MIN_SECONDS_BETWEEN_TWEETS:
-            time.sleep(MIN_SECONDS_BETWEEN_TWEETS - (now_ts - last_tweet_ts))
+            # Downgrade gating (as in old script)
+            if change_type == "Downgrade":
+                if not ALERT_ON_DOWNGRADES:
+                    continue
+                if last_entry is None:
+                    print(f"↘️ Skipping downgrade for {alert['name']} – no prior tweet.")
+                    continue
+                last_level = last_entry.get("risk_level", "None")
+                if last_level not in TWEET_LEVELS:
+                    print(
+                        f"↘️ Skipping downgrade for {alert['name']} – "
+                        f"last tweeted level {last_level} not in {TWEET_LEVELS}."
+                    )
+                    continue
 
-        new_tweet_id = tweet_region_cluster(region_key, alerts_in_region, client=client)
-        last_tweet_ts = time.time()
+            quote_tweet_id = None
+            if change_type in ["Upgrade", "Downgrade"] and last_entry and "tweet_id" in last_entry:
+                quote_tweet_id = last_entry["tweet_id"]
 
-        # Update tweet log per city so history still works
-        if new_tweet_id:
-            for _, alert in alerts_in_region:
-                key = f"{alert['latitude']:.4f},{alert['longitude']:.4f}"
-                tweeted_alerts[key] = {
+            now_ts = time.time()
+            if now_ts - last_tweet_ts < MIN_SECONDS_BETWEEN_TWEETS:
+                time.sleep(MIN_SECONDS_BETWEEN_TWEETS - (now_ts - last_tweet_ts))
+
+            new_tweet_id = tweet_alert(change_type, alert, quote_tweet_id=quote_tweet_id)
+            last_tweet_ts = time.time()
+
+            if new_tweet_id:
+                level = alert["dynamic_level"]
+                # Mark as resolved if outside tweet levels
+                resolved = level not in TWEET_LEVELS
+                tweeted_alerts[coord_key] = {
                     "country": alert.get("country", ""),
                     "name": alert["name"],
-                    "risk_level": alert["dynamic_level"],
+                    "risk_level": level,
                     "latitude": alert["latitude"],
                     "longitude": alert["longitude"],
                     "rain_mm": alert[f"rain_{FORECAST_HOURS}h_mm"],
@@ -855,11 +840,70 @@ def main():
                     "raw_dynamic_score": alert["raw_dynamic_score"],
                     "last_updated": datetime.now(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z"),
                     "tweet_id": new_tweet_id,
+                    "resolved": resolved,
+                }
+
+            continue  # done with this region (only one city)
+
+        # ---------------- Multi-city region → cluster style ----------------
+        cluster_type = cluster_change_type(alerts_in_region)
+
+        # Respect global downgrade toggle
+        if cluster_type == "Downgrade" and not ALERT_ON_DOWNGRADES:
+            continue
+
+        # Use first city in region as representative for history / quoting
+        rep_alert = alerts_in_region[0][1]
+        rep_key = f"{rep_alert['latitude']:.4f},{rep_alert['longitude']:.4f}"
+        rep_last = tweeted_alerts.get(rep_key)
+
+        # Optional gating: only tweet downgrade if region was previously tweeted
+        if cluster_type == "Downgrade" and rep_last is None:
+            print(
+                f"↘️ Skipping region downgrade for {region_key} – "
+                f"no prior tweet recorded."
+            )
+            continue
+
+        quote_tweet_id = None
+        if cluster_type in ["Upgrade", "Downgrade"] and rep_last and "tweet_id" in rep_last:
+            quote_tweet_id = rep_last["tweet_id"]
+
+        now_ts = time.time()
+        if now_ts - last_tweet_ts < MIN_SECONDS_BETWEEN_TWEETS:
+            time.sleep(MIN_SECONDS_BETWEEN_TWEETS - (now_ts - last_tweet_ts))
+
+        new_tweet_id = tweet_region_cluster(
+            region_key,
+            alerts_in_region,
+            client=client,
+            change_type=cluster_type,
+            quote_tweet_id=quote_tweet_id,
+        )
+        last_tweet_ts = time.time()
+
+        if new_tweet_id:
+            # Update log for ALL cities in this region to the new tweet_id
+            for _, alert in alerts_in_region:
+                coord_key = f"{alert['latitude']:.4f},{alert['longitude']:.4f}"
+                level = alert["dynamic_level"]
+                resolved = level not in TWEET_LEVELS
+                tweeted_alerts[coord_key] = {
+                    "country": alert.get("country", ""),
+                    "name": alert["name"],
+                    "risk_level": level,
+                    "latitude": alert["latitude"],
+                    "longitude": alert["longitude"],
+                    "rain_mm": alert[f"rain_{FORECAST_HOURS}h_mm"],
+                    "soil_moisture": alert["soil_moisture_avg"],
+                    "raw_dynamic_score": alert["raw_dynamic_score"],
+                    "last_updated": datetime.now(ZoneInfo("UTC")).isoformat().replace("+00:00", "Z"),
+                    "tweet_id": new_tweet_id,
+                    "resolved": resolved,
                 }
 
     save_tweeted_alerts(tweeted_alerts)
 
-    # Rotate old comparison snapshots, then write the new one
     rotate_comparison_snapshots(COMPARISON_HISTORY)
 
     with open(COMPARISON_PATH, "w", encoding="utf-8") as f:
