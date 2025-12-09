@@ -1,4 +1,4 @@
-name: 🌧️ FloodLink-NOAA Live Risk Engine
+name: 🌧️ FloodLink 2-NOAA Live Risk Engine
 
 on:
   schedule:
