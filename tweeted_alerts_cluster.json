@@ -2,41 +2,41 @@
   "-31.7700,-52.3410": {
     "country": "Brazil",
     "name": "Pelotas",
-    "risk_level": "Medium",
+    "risk_level": "Low",
     "latitude": -31.76997,
     "longitude": -52.34101,
-    "rain_mm": 70.06,
-    "soil_moisture": 0.738,
-    "raw_dynamic_score": 9.392,
-    "last_updated": "2025-12-10T03:52:35.121398Z",
-    "tweet_id": "1998601711959629899",
-    "resolved": false
+    "rain_mm": 12.25,
+    "soil_moisture": 0.698,
+    "raw_dynamic_score": 1.607,
+    "last_updated": "2025-12-10T10:15:20.518788Z",
+    "tweet_id": "1998698035623403813",
+    "resolved": true
   },
   "-31.7633,-52.4839": {
     "country": "Brazil",
     "name": "Capão do Leão",
-    "risk_level": "Medium",
+    "risk_level": "Low",
     "latitude": -31.76333,
     "longitude": -52.48389,
-    "rain_mm": 80.88,
-    "soil_moisture": 0.662,
-    "raw_dynamic_score": 10.397,
-    "last_updated": "2025-12-10T03:52:35.121420Z",
-    "tweet_id": "1998601711959629899",
-    "resolved": false
+    "rain_mm": 9.31,
+    "soil_moisture": 0.595,
+    "raw_dynamic_score": 1.152,
+    "last_updated": "2025-12-10T10:15:20.518818Z",
+    "tweet_id": "1998698035623403813",
+    "resolved": true
   },
   "-32.2375,-53.0869": {
     "country": "Brazil",
     "name": "Arroio Grande",
-    "risk_level": "Medium",
+    "risk_level": "Low",
     "latitude": -32.2375,
     "longitude": -53.08694,
-    "rain_mm": 59.44,
-    "soil_moisture": 0.607,
-    "raw_dynamic_score": 7.405,
-    "last_updated": "2025-12-10T03:52:35.121426Z",
-    "tweet_id": "1998601711959629899",
-    "resolved": false
+    "rain_mm": 21.62,
+    "soil_moisture": 0.617,
+    "raw_dynamic_score": 2.71,
+    "last_updated": "2025-12-10T10:15:20.518829Z",
+    "tweet_id": "1998698035623403813",
+    "resolved": true
   },
   "-0.6190,100.1200": {
     "country": "Indonesia",
@@ -54,14 +54,14 @@
   "-0.9492,100.3543": {
     "country": "Indonesia",
     "name": "Padang",
-    "risk_level": "High",
+    "risk_level": "Low",
     "latitude": -0.94924,
     "longitude": 100.35427,
-    "rain_mm": 80.62,
+    "rain_mm": 19.44,
     "soil_moisture": 1.0,
-    "raw_dynamic_score": 12.336,
-    "last_updated": "2025-12-10T03:53:35.585125Z",
-    "tweet_id": "1998601965501112800",
-    "resolved": false
+    "raw_dynamic_score": 2.974,
+    "last_updated": "2025-12-10T10:15:50.755079Z",
+    "tweet_id": "1998698162509459849",
+    "resolved": true
   }
 }
