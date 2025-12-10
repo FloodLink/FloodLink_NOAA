@@ -1,30 +1,4 @@
 {
-  "35.1627,33.8832": {
-    "country": "Cyprus",
-    "name": "Égkomi",
-    "risk_level": "Low",
-    "latitude": 35.16272,
-    "longitude": 33.88322,
-    "rain_mm": 40.88,
-    "soil_moisture": 1.0,
-    "raw_dynamic_score": 6.254,
-    "last_updated": "2025-12-10T03:53:05.363538Z",
-    "tweet_id": "1998601838690553871",
-    "resolved": true
-  },
-  "34.6281,45.3185": {
-    "country": "Iraq",
-    "name": "Kelar",
-    "risk_level": "Low",
-    "latitude": 34.62805,
-    "longitude": 45.31852,
-    "rain_mm": 35.5,
-    "soil_moisture": 0.737,
-    "raw_dynamic_score": 4.757,
-    "last_updated": "2025-12-10T03:54:05.845636Z",
-    "tweet_id": "1998602092374548541",
-    "resolved": true
-  },
   "-31.7700,-52.3410": {
     "country": "Brazil",
     "name": "Pelotas",
