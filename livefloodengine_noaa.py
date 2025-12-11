@@ -29,7 +29,7 @@ import pygrib
 # -------------------------------
 # CONFIGURATION
 # -------------------------------
-CSV_PATH = "cities15000.csv"
+CSV_PATH = "cities300000.csv"
 COMPARISON_PATH = "alerts_comparison.json"   # single source of truth
 TWEET_LOG_PATH = "tweeted_alerts.json"       # map-ready tweet history
 
