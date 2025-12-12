@@ -2,13 +2,14 @@
   "-25.5167,-54.6167": {
     "country": "Paraguay",
     "name": "Ciudad del Este",
-    "risk_level": "Medium",
+    "risk_level": "Low",
     "latitude": -25.5167,
     "longitude": -54.6167,
-    "rain_mm": 63.25,
-    "soil_moisture": 0.713,
-    "raw_dynamic_score": 9.291,
-    "last_updated": "2025-12-12T16:28:27.268067Z",
-    "tweet_id": "1999516708319760615"
+    "rain_mm": 0.69,
+    "soil_moisture": 0.671,
+    "raw_dynamic_score": 0.099,
+    "last_updated": "2025-12-12T22:19:47.853173Z",
+    "resolved": true,
+    "tweet_id": "1999605126609203575"
   }
 }
