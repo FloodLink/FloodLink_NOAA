@@ -2,13 +2,14 @@
   "-21.7664,-41.3196": {
     "country": "Brazil",
     "name": "Campos dos Goytacazes",
-    "risk_level": "Medium",
+    "risk_level": "Low",
     "latitude": -21.7664,
     "longitude": -41.3196,
-    "rain_mm": 64.81,
-    "soil_moisture": 0.665,
-    "raw_dynamic_score": 9.241,
-    "last_updated": "2025-12-17T04:33:01.547715Z",
-    "tweet_id": "2001148604166156705"
+    "rain_mm": 0.25,
+    "soil_moisture": 0.596,
+    "raw_dynamic_score": 0.034,
+    "last_updated": "2025-12-17T10:23:25.084852Z",
+    "resolved": true,
+    "tweet_id": "2001236783124681068"
   }
 }
