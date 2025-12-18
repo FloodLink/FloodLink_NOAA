@@ -1,1 +1,14 @@
-{}
+{
+  "3.8850,-77.0700": {
+    "country": "Colombia",
+    "name": "Buenaventura",
+    "risk_level": "Medium",
+    "latitude": 3.885,
+    "longitude": -77.07,
+    "rain_mm": 69.5,
+    "soil_moisture": 0.739,
+    "raw_dynamic_score": 10.09,
+    "last_updated": "2025-12-18T10:22:39.645848Z",
+    "tweet_id": "2001598980623364265"
+  }
+}
